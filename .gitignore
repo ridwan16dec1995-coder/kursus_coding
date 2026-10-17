@@ -1,0 +1,50 @@
+﻿
+# Environment dan rahasia
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+backend/.venv/
+
+# Database lokal
+*.db
+*.sqlite
+*.sqlite3
+instance/
+backend/instance/
+
+# Backup dan data lokal
+backups/
+*.bak
+*.backup
+
+# Log
+*.log
+*.log.*
+
+# Node.js
+node_modules/
+frontend/node_modules/
+
+# Hasil build
+dist/
+frontend/dist/
+build/
+
+# Pengujian dan cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editor dan sistem operasi
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

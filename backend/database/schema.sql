@@ -1,0 +1,41 @@
+CREATE DATABASE IF NOT EXISTS `kelas_ngoding`;
+USE `kelas_ngoding`;
+
+CREATE TABLE IF NOT EXISTS `admin_users` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `username` VARCHAR(64) NOT NULL UNIQUE,
+  `password_hash` VARCHAR(255) NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS `students` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `full_name` VARCHAR(150) NOT NULL,
+  `email` VARCHAR(150) NOT NULL UNIQUE,
+  `username` VARCHAR(64) UNIQUE NULL,
+  `password_hash` VARCHAR(255) NULL,
+  `phone` VARCHAR(30) DEFAULT NULL,
+  `school` VARCHAR(150) DEFAULT NULL,
+  `interest_level` VARCHAR(50) DEFAULT 'Pemula',
+  `notes` TEXT,
+  `status` VARCHAR(50) DEFAULT 'baru',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS `announcements` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `title` VARCHAR(200) NOT NULL,
+  `content` TEXT NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS `student_progress` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `student_id` INT NOT NULL,
+  `subject` VARCHAR(100) NOT NULL,
+  `score` INT NOT NULL,
+  `notes` TEXT,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`student_id`) REFERENCES `students`(`id`) ON DELETE CASCADE
+);
+
