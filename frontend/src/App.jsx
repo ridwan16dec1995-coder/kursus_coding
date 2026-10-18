@@ -36,10 +36,15 @@ const emptyProgress = {
   notes: '',
 }
 
+const emptyCourse = { name: '', description: '', status: 'aktif' }
+const emptyEnrollment = { studentId: '', courseId: '' }
+const emptyWeeklyGrade = { enrollmentId: '', weekNumber: '', grade: '', notes: '' }
+
 const adminModules = [
   { id: 'ringkasan', label: 'Ringkasan' },
   { id: 'murid', label: 'Murid' },
   { id: 'progress', label: 'Progress Belajar' },
+  { id: 'kursus', label: 'Kursus & Pendaftaran' },
   { id: 'pengumuman', label: 'Pengumuman' },
 ]
 
@@ -122,6 +127,11 @@ function App() {
   const [registrationForm, setRegistrationForm] = useState(emptyRegistration)
   const [announcementForm, setAnnouncementForm] = useState(emptyAnnouncement)
   const [progressForm, setProgressForm] = useState(emptyProgress)
+  const [courseForm, setCourseForm] = useState(emptyCourse)
+  const [enrollmentForm, setEnrollmentForm] = useState(emptyEnrollment)
+  const [weeklyGradeForm, setWeeklyGradeForm] = useState(emptyWeeklyGrade)
+  const [courses, setCourses] = useState([])
+  const [enrollments, setEnrollments] = useState([])
   const [admin, setAdmin] = useState(null)
   const [student, setStudent] = useState(null)
   const [studentSearch, setStudentSearch] = useState('')
@@ -148,6 +158,11 @@ function App() {
     setActiveAdminView('ringkasan')
     setStudents([])
     setProgressForm(emptyProgress)
+    setCourseForm(emptyCourse)
+    setEnrollmentForm(emptyEnrollment)
+    setWeeklyGradeForm(emptyWeeklyGrade)
+    setCourses([])
+    setEnrollments([])
     if (text) {
       setMessage({ type: 'error', text })
     }
@@ -188,6 +203,25 @@ function App() {
     return true
   }
 
+  const fetchCourses = async () => {
+    const response = await fetch(`${API_BASE_URL}/courses`)
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.message || 'Gagal memuat kursus.')
+    setCourses(result.items || [])
+  }
+
+  const fetchEnrollments = async () => {
+    const response = await fetch(`${API_BASE_URL}/enrollments`, { credentials: 'include' })
+    const result = await response.json()
+    if (response.status === 401) {
+      clearAdminData('Sesi admin telah berakhir. Silakan login kembali.')
+      return false
+    }
+    if (!response.ok) throw new Error(result.message || 'Gagal memuat pendaftaran kursus.')
+    setEnrollments(result.items || [])
+    return true
+  }
+
   useEffect(() => {
     const syncPortalWithHistory = () => setPortal(getPortalFromPath())
     window.addEventListener('popstate', syncPortalWithHistory)
@@ -198,12 +232,14 @@ function App() {
     const loadApplication = async () => {
       try {
         await fetchAnnouncements()
+        await fetchCourses()
         const adminResponse = await fetch(`${API_BASE_URL}/admin/session`, { credentials: 'include' })
         const adminResult = await adminResponse.json()
 
         if (adminResponse.ok && adminResult.authenticated) {
           setAdmin({ username: adminResult.username, csrfToken: adminResult.csrfToken })
           await fetchStudents()
+          await fetchEnrollments()
           navigateToPortal('admin', true)
           return
         }
@@ -290,6 +326,7 @@ function App() {
       navigateToPortal('admin')
       setLoginForm(emptyLogin)
       await fetchStudents()
+      await fetchEnrollments()
       setMessage({ type: 'success', text: `Login berhasil sebagai ${result.username}.` })
     } catch (error) {
       console.error(error)
@@ -478,6 +515,79 @@ function App() {
     }
   }
 
+  const handleCourseSubmit = async (event) => {
+    event.preventDefault()
+    try {
+      const response = await fetch(`${API_BASE_URL}/courses`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': admin.csrfToken },
+        body: JSON.stringify(courseForm),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        setMessage({ type: 'error', text: result.message || 'Kursus gagal dibuat.' })
+        return
+      }
+      setCourseForm(emptyCourse)
+      setMessage({ type: 'success', text: 'Kursus berhasil dibuat.' })
+      await fetchCourses()
+    } catch (error) {
+      console.error(error)
+      setMessage({ type: 'error', text: 'Kursus gagal dibuat.' })
+    }
+  }
+
+  const handleEnrollmentSubmit = async (event) => {
+    event.preventDefault()
+    try {
+      const response = await fetch(`${API_BASE_URL}/enrollments`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': admin.csrfToken },
+        body: JSON.stringify(enrollmentForm),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        setMessage({ type: 'error', text: result.message || 'Pendaftaran kursus gagal.' })
+        return
+      }
+      setEnrollmentForm(emptyEnrollment)
+      setMessage({ type: 'success', text: 'Siswa berhasil didaftarkan ke kursus.' })
+      await Promise.all([fetchEnrollments(), fetchStudents()])
+    } catch (error) {
+      console.error(error)
+      setMessage({ type: 'error', text: 'Pendaftaran kursus gagal.' })
+    }
+  }
+
+  const handleWeeklyGradeSubmit = async (event) => {
+    event.preventDefault()
+    try {
+      const response = await fetch(`${API_BASE_URL}/enrollments/${weeklyGradeForm.enrollmentId}/grades`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': admin.csrfToken },
+        body: JSON.stringify({
+          weekNumber: Number(weeklyGradeForm.weekNumber),
+          grade: weeklyGradeForm.grade,
+          notes: weeklyGradeForm.notes,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        setMessage({ type: 'error', text: result.message || 'Nilai mingguan gagal disimpan.' })
+        return
+      }
+      setWeeklyGradeForm(emptyWeeklyGrade)
+      setMessage({ type: 'success', text: 'Nilai mingguan berhasil disimpan.' })
+      await Promise.all([fetchEnrollments(), fetchStudents()])
+    } catch (error) {
+      console.error(error)
+      setMessage({ type: 'error', text: 'Nilai mingguan gagal disimpan.' })
+    }
+  }
+
   return (
     <div className="page-shell">
       <header className="topbar">
@@ -487,7 +597,7 @@ function App() {
         </div>
         {!admin && !student && (
           <nav className="portal-links" aria-label="Portal aplikasi">
-            <button type="button" className={isPublicPortal ? 'is-active' : ''} onClick={() => navigateToPortal('publik')}>Pendaftaran</button>
+              <button type="button" className={isPublicPortal ? 'is-active' : ''} onClick={() => navigateToPortal('publik')}>Pendaftaran Umum</button>
             <button type="button" className={isStudentPortal ? 'is-active' : ''} onClick={() => navigateToPortal('murid')}>Portal Murid</button>
             <button type="button" className={isAdminPortal ? 'is-active' : ''} onClick={() => navigateToPortal('admin')}>Portal Admin</button>
           </nav>
@@ -724,6 +834,32 @@ function App() {
             )}
           </section>
           <section className="panel widetwo">
+            <h2>Kursus Saya</h2>
+            {(student.courses || []).length === 0 ? (
+              <p className="empty-state">Belum ada kursus yang terdaftar.</p>
+            ) : (
+              <div className="student-progress-list">
+                {student.courses.map((enrollment) => (
+                  <article key={enrollment.id} className="student-progress-item">
+                    <div>
+                      <strong>{enrollment.courseName}</strong>
+                      <p>Status: {enrollment.status}</p>
+                      {(enrollment.weeklyGrades || []).length === 0 ? (
+                        <p className="student-progress-detail">Nilai mingguan belum tersedia.</p>
+                      ) : (
+                        enrollment.weeklyGrades.map((grade) => (
+                          <p key={grade.id} className="student-progress-detail">
+                            Minggu {grade.weekNumber}: <strong>{grade.grade || getScoreCategory(grade.score).letter} ({grade.score})</strong>{grade.notes ? ` — ${grade.notes}` : ''}
+                          </p>
+                        ))
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+          <section className="panel widetwo">
             <h2>Pengumuman</h2>
             <div className="list-box">
               {announcements.length === 0 ? (
@@ -815,7 +951,7 @@ function App() {
                 <div className="admin-module-heading">
                   <p>Manajemen murid</p>
                   <h2>Data Murid</h2>
-                  <span>Periksa informasi pendaftaran dan nilai belajar murid dalam satu tampilan.</span>
+                  <span>Periksa pendaftaran umum, enrollment kursus, dan nilai belajar murid dalam satu tampilan.</span>
                 </div>
 
                 <div className="student-toolbar">
@@ -1004,6 +1140,46 @@ function App() {
                   </label>
                   <button type="submit" className="primary-btn">Simpan nilai</button>
                 </form>
+              </section>
+            )}
+
+            {activeAdminView === 'kursus' && (
+              <section className="panel admin-module">
+                <div className="admin-module-heading">
+                  <p>Manajemen akademik</p>
+                  <h2>Kursus & Pendaftaran</h2>
+                  <span>Kelola katalog kursus, pendaftaran siswa, dan nilai mingguan.</span>
+                </div>
+                <div className="content-grid">
+                  <form onSubmit={handleCourseSubmit} className="stacked-form">
+                    <h3>Buat kursus</h3>
+                    <label>Nama kursus<input required maxLength="150" value={courseForm.name} onChange={(event) => setCourseForm({ ...courseForm, name: event.target.value })} /></label>
+                    <label>Deskripsi<textarea rows="3" value={courseForm.description} onChange={(event) => setCourseForm({ ...courseForm, description: event.target.value })} /></label>
+                    <button type="submit" className="primary-btn">Simpan kursus</button>
+                  </form>
+                  <form onSubmit={handleEnrollmentSubmit} className="stacked-form">
+                    <h3>Daftarkan siswa</h3>
+                    <label>Siswa<select required value={enrollmentForm.studentId} onChange={(event) => setEnrollmentForm({ ...enrollmentForm, studentId: event.target.value })}><option value="">Pilih siswa</option>{students.map((item) => <option key={item.id} value={item.id}>{item.fullName}</option>)}</select></label>
+                    <label>Kursus<select required value={enrollmentForm.courseId} onChange={(event) => setEnrollmentForm({ ...enrollmentForm, courseId: event.target.value })}><option value="">Pilih kursus</option>{courses.filter((item) => item.status === 'aktif').map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                    <button type="submit" className="primary-btn">Daftarkan</button>
+                  </form>
+                </div>
+                <form onSubmit={handleWeeklyGradeSubmit} className="stacked-form full-width">
+                  <h3>Nilai mingguan</h3>
+                  <div className="two-cols">
+                    <label>Pendaftaran<select required value={weeklyGradeForm.enrollmentId} onChange={(event) => setWeeklyGradeForm({ ...weeklyGradeForm, enrollmentId: event.target.value })}><option value="">Pilih pendaftaran</option>{enrollments.map((item) => <option key={item.id} value={item.id}>{item.studentName} — {item.courseName}</option>)}</select></label>
+                    <label>Minggu<input required type="number" min="1" max="52" value={weeklyGradeForm.weekNumber} onChange={(event) => setWeeklyGradeForm({ ...weeklyGradeForm, weekNumber: event.target.value })} /></label>
+                  </div>
+                  <div className="two-cols">
+                    <label>Nilai<select required value={weeklyGradeForm.grade} onChange={(event) => setWeeklyGradeForm({ ...weeklyGradeForm, grade: event.target.value })}><option value="">Pilih nilai</option>{gradeOptions.map((item) => <option key={item.letter} value={item.letter}>{item.letter} ({item.score})</option>)}</select></label>
+                    <label>Catatan<input value={weeklyGradeForm.notes} onChange={(event) => setWeeklyGradeForm({ ...weeklyGradeForm, notes: event.target.value })} /></label>
+                  </div>
+                  <button type="submit" className="primary-btn">Simpan nilai mingguan</button>
+                </form>
+                <div className="list-box">
+                  {courses.map((course) => <div key={course.id} className="list-item"><strong>{course.name}</strong><p>{course.description || 'Tanpa deskripsi'} · {course.status}</p></div>)}
+                  {enrollments.map((item) => <div key={`enrollment-${item.id}`} className="list-item"><strong>{item.studentName} — {item.courseName}</strong><p>{item.weeklyGrades.length} nilai mingguan · {item.status}</p></div>)}
+                </div>
               </section>
             )}
 

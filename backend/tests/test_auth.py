@@ -1,18 +1,21 @@
-import tempfile
 import unittest
-from pathlib import Path
 
-from app import create_app, db
+from app import _rate_limit_state, create_app, db
+from sqlalchemy.pool import StaticPool
 
 
 class AuthenticationTestCase(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        database_path = Path(self.temp_dir.name, 'test.db').as_posix()
         self.app = create_app({
             'TESTING': True,
+            'RATE_LIMIT_ENABLED': False,
+            'AUTO_CREATE_SCHEMA': True,
             'SECRET_KEY': 'test-secret',
-            'SQLALCHEMY_DATABASE_URI': f'sqlite:///{database_path}',
+            'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
+            'SQLALCHEMY_ENGINE_OPTIONS': {
+                'poolclass': StaticPool,
+                'connect_args': {'check_same_thread': False},
+            },
             'CORS_ALLOWED_ORIGINS': ['http://localhost:5173'],
             'ADMIN_BOOTSTRAP_USERNAME': 'admin-test',
             'ADMIN_BOOTSTRAP_PASSWORD': 'password-test',
@@ -24,7 +27,6 @@ class AuthenticationTestCase(unittest.TestCase):
             db.session.remove()
             db.drop_all()
             db.engine.dispose()
-        self.temp_dir.cleanup()
 
     def login(self):
         response = self.client.post('/api/admin/login', json={
@@ -106,6 +108,25 @@ class AuthenticationTestCase(unittest.TestCase):
         session_response = self.client.get('/api/admin/session')
         self.assertEqual(session_response.get_json(), {'ok': True, 'authenticated': False})
 
+    def test_public_registration_is_rate_limited(self):
+        self.app.config['RATE_LIMIT_ENABLED'] = True
+        _rate_limit_state.clear()
+        for index in range(5):
+            response = self.client.post('/api/students/register', json={
+                'fullName': f'Murid {index}',
+                'email': f'murid-{index}@example.com',
+                'username': f'murid-{index}',
+                'password': 'password-murid',
+            })
+            self.assertEqual(response.status_code, 200)
+        limited = self.client.post('/api/students/register', json={
+            'fullName': 'Murid Keenam',
+            'email': 'murid-6@example.com',
+            'username': 'murid-6',
+            'password': 'password-murid',
+        })
+        self.assertEqual(limited.status_code, 429)
+
     def test_session_is_restored_after_login(self):
         login_data = self.login()
 
@@ -151,6 +172,24 @@ class AuthenticationTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
 
         self.register_student()
+
+    def test_health_check_confirms_database_and_sets_security_headers(self):
+        response = self.client.get('/api/health')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['database'], 'ready')
+        self.assertEqual(response.headers['X-Content-Type-Options'], 'nosniff')
+        self.assertEqual(response.headers['X-Frame-Options'], 'DENY')
+
+    def test_production_configuration_requires_secure_session_cookie(self):
+        with self.assertRaisesRegex(RuntimeError, 'SESSION_COOKIE_SECURE'):
+            create_app({
+                'APP_ENV': 'production',
+                'SECRET_KEY': 'a' * 32,
+                'SESSION_COOKIE_SECURE': False,
+                'CORS_ALLOWED_ORIGINS': ['https://kursus.example.com'],
+                'AUTO_CREATE_SCHEMA': False,
+            })
 
     def test_progress_accepts_only_the_four_configured_scores(self):
         student = self.register_student()
@@ -211,6 +250,73 @@ class AuthenticationTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.get('/api/students').status_code, 401)
+
+    def test_admin_can_create_course_enrollment_and_weekly_grade(self):
+        student = self.register_student()
+        login_data = self.login()
+        headers = {'X-CSRF-Token': login_data['csrfToken']}
+
+        course_response = self.client.post(
+            '/api/courses',
+            json={'name': 'Python Dasar', 'description': 'Kursus pemrograman dasar'},
+            headers=headers,
+        )
+        self.assertEqual(course_response.status_code, 201)
+        course = course_response.get_json()['data']
+
+        enrollment_response = self.client.post(
+            '/api/enrollments',
+            json={'studentId': student['id'], 'courseId': course['id']},
+            headers=headers,
+        )
+        self.assertEqual(enrollment_response.status_code, 201)
+        enrollment = enrollment_response.get_json()['data']
+
+        grade_response = self.client.post(
+            f"/api/enrollments/{enrollment['id']}/grades",
+            json={'weekNumber': 1, 'grade': 'B', 'notes': 'Fondasi sudah baik'},
+            headers=headers,
+        )
+        self.assertEqual(grade_response.status_code, 201)
+        self.assertEqual(grade_response.get_json()['data']['weeklyGrades'][0]['score'], 80)
+        self.assertEqual(grade_response.get_json()['data']['weeklyGrades'][0]['grade'], 'B')
+
+        duplicate_grade = self.client.post(
+            f"/api/enrollments/{enrollment['id']}/grades",
+            json={'weekNumber': 1, 'grade': 'A'},
+            headers=headers,
+        )
+        self.assertEqual(duplicate_grade.status_code, 409)
+
+        invalid_grade = self.client.post(
+            f"/api/enrollments/{enrollment['id']}/grades",
+            json={'weekNumber': 2, 'grade': 'E'},
+            headers=headers,
+        )
+        self.assertEqual(invalid_grade.status_code, 400)
+
+    def test_student_session_includes_only_own_enrollments(self):
+        student = self.register_student()
+        login_data = self.login()
+        headers = {'X-CSRF-Token': login_data['csrfToken']}
+        course = self.client.post(
+            '/api/courses',
+            json={'name': 'Web Dasar'},
+            headers=headers,
+        ).get_json()['data']
+        self.client.post(
+            '/api/enrollments',
+            json={'studentId': student['id'], 'courseId': course['id']},
+            headers=headers,
+        )
+        self.client.post('/api/admin/logout', headers=headers)
+
+        student_login = self.student_login()
+        session_response = self.client.get('/api/student/session')
+        self.assertEqual(session_response.status_code, 200)
+        self.assertEqual(session_response.get_json()['student']['id'], student['id'])
+        self.assertEqual(session_response.get_json()['student']['courses'][0]['courseName'], 'Web Dasar')
+        self.assertTrue(student_login['csrfToken'])
 
 
 if __name__ == '__main__':
