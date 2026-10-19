@@ -367,7 +367,12 @@ def create_app(test_config=None):
         SESSION_COOKIE_NAME='course_admin_session',
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SECURE=as_bool(os.getenv('SESSION_COOKIE_SECURE', 'false')),
-        SESSION_COOKIE_SAMESITE=os.getenv('SESSION_COOKIE_SAMESITE', 'Lax'),
+        # The production frontend and API use different Vercel origins, so the
+        # session cookie must be sent on credentialed cross-origin requests.
+        SESSION_COOKIE_SAMESITE=os.getenv(
+            'SESSION_COOKIE_SAMESITE',
+            'None' if app_env == 'production' else 'Lax',
+        ),
         PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.getenv('SESSION_LIFETIME_HOURS', '8'))),
         CORS_ALLOWED_ORIGINS=allowed_origins_from_environment(),
         ADMIN_BOOTSTRAP_USERNAME=os.getenv('ADMIN_BOOTSTRAP_USERNAME'),
