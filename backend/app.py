@@ -65,6 +65,15 @@ def as_origins(value):
     return [origin.strip() for origin in (value or '').split(',') if origin.strip()]
 
 
+def allowed_origins_from_environment():
+    configured = as_origins(os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:5173'))
+    # Keep the public Vercel frontend usable when dashboard variables are stale.
+    public_frontend = 'https://kursus-coding-6rz1.vercel.app'
+    if public_frontend not in configured:
+        configured.append(public_frontend)
+    return configured
+
+
 def validate_runtime_configuration(app):
     if app.config['APP_ENV'] != 'production':
         return
@@ -360,7 +369,7 @@ def create_app(test_config=None):
         SESSION_COOKIE_SECURE=as_bool(os.getenv('SESSION_COOKIE_SECURE', 'false')),
         SESSION_COOKIE_SAMESITE=os.getenv('SESSION_COOKIE_SAMESITE', 'Lax'),
         PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.getenv('SESSION_LIFETIME_HOURS', '8'))),
-        CORS_ALLOWED_ORIGINS=as_origins(os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:5173')),
+        CORS_ALLOWED_ORIGINS=allowed_origins_from_environment(),
         ADMIN_BOOTSTRAP_USERNAME=os.getenv('ADMIN_BOOTSTRAP_USERNAME'),
         ADMIN_BOOTSTRAP_PASSWORD=os.getenv('ADMIN_BOOTSTRAP_PASSWORD'),
     )
