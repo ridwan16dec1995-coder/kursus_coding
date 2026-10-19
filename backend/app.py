@@ -397,8 +397,12 @@ def create_app(test_config=None):
             ensure_student_login_schema()
             username = app.config.get('ADMIN_BOOTSTRAP_USERNAME')
             password = app.config.get('ADMIN_BOOTSTRAP_PASSWORD')
-            if username and password and not AdminUser.query.first():
-                db.session.add(AdminUser(username=username, password_hash=generate_password_hash(password)))
+            if username and password:
+                bootstrap_admin = AdminUser.query.filter_by(username=username).first()
+                if bootstrap_admin:
+                    bootstrap_admin.password_hash = generate_password_hash(password)
+                elif not AdminUser.query.first():
+                    db.session.add(AdminUser(username=username, password_hash=generate_password_hash(password)))
                 db.session.commit()
 
     @app.after_request
