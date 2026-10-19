@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+// Use the Vercel same-origin proxy in production so session cookies are first-party.
+const API_BASE_URL = import.meta.env.DEV
+  ? (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api')
+  : '/api'
 
 const emptyRegistration = {
   fullName: '',
