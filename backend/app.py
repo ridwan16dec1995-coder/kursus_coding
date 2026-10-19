@@ -401,7 +401,7 @@ def create_app(test_config=None):
                 bootstrap_admin = AdminUser.query.filter_by(username=username).first()
                 if bootstrap_admin:
                     bootstrap_admin.password_hash = generate_password_hash(password)
-                elif not AdminUser.query.first():
+                else:
                     db.session.add(AdminUser(username=username, password_hash=generate_password_hash(password)))
                 db.session.commit()
 
