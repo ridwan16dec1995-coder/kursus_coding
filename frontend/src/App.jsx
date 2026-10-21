@@ -202,6 +202,19 @@ function App() {
     recognition.start()
   }
 
+  const announceRegistrationSuccess = () => {
+    if (!('speechSynthesis' in window)) return
+
+    window.speechSynthesis.cancel()
+    const announcement = new SpeechSynthesisUtterance(
+      `Pendaftaran berhasil. Selamat datang di ${BRAND_NAME}.`,
+    )
+    announcement.lang = 'id-ID'
+    announcement.rate = 0.95
+    announcement.pitch = 1
+    window.speechSynthesis.speak(announcement)
+  }
+
   const navigateToPortal = (nextPortal, replace = false) => {
     const destination = nextPortal === 'admin' ? '/admin' : nextPortal === 'murid' ? '/murid' : '/'
     window.history[replace ? 'replaceState' : 'pushState']({}, '', destination)
@@ -487,6 +500,7 @@ function App() {
 
       setStudentLoginForm({ username: registrationForm.username, password: '' })
       setMessage({ type: 'success', text: 'Pendaftaran berhasil. Gunakan username dan password yang dibuat untuk login sebagai murid.' })
+      announceRegistrationSuccess()
       setRegistrationForm(emptyRegistration)
       setVoiceStatus('idle')
       setVoiceTranscript('')
