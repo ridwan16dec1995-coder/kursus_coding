@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
 // Use the Vercel same-origin proxy in production so session cookies are first-party.
@@ -18,7 +18,6 @@ const emptyRegistration = {
 }
 
 const BRAND_NAME = '<R/one> Code Accademy'
-const VOICE_VERIFICATION_PHRASE = `Saya mendaftar di ${BRAND_NAME}`
 
 const emptyAnnouncement = {
   title: '',
@@ -147,60 +146,10 @@ function App() {
   const [isStudentLoggingIn, setIsStudentLoggingIn] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
   const [portal, setPortal] = useState(getPortalFromPath)
-  const [voiceStatus, setVoiceStatus] = useState('idle')
-  const [voiceTranscript, setVoiceTranscript] = useState('')
-  const [voiceError, setVoiceError] = useState('')
-  const recognitionRef = useRef(null)
 
   const isPublicPortal = portal === 'publik'
   const isAdminPortal = portal === 'admin'
   const isStudentPortal = portal === 'murid'
-
-  const normalizeVoiceText = (value) => value
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  const startVoiceVerification = () => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      setVoiceStatus('error')
-      setVoiceError('Browser ini belum mendukung validasi suara. Gunakan Chrome atau Edge terbaru.')
-      return
-    }
-
-    recognitionRef.current?.stop()
-    const recognition = new SpeechRecognition()
-    recognition.lang = 'id-ID'
-    recognition.interimResults = false
-    recognition.maxAlternatives = 1
-    recognition.onstart = () => {
-      setVoiceStatus('listening')
-      setVoiceError('')
-      setVoiceTranscript('')
-    }
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript.trim()
-      setVoiceTranscript(transcript)
-      const spoken = normalizeVoiceText(transcript)
-      const expected = normalizeVoiceText(VOICE_VERIFICATION_PHRASE)
-      const isValid = spoken === expected || spoken.includes(expected)
-      setVoiceStatus(isValid ? 'verified' : 'invalid')
-      setVoiceError(isValid ? '' : 'Kalimat belum cocok. Silakan coba lagi dan ucapkan kalimat persis seperti contoh.')
-    }
-    recognition.onerror = (event) => {
-      setVoiceStatus('error')
-      setVoiceError(event.error === 'not-allowed'
-        ? 'Izin mikrofon ditolak. Izinkan mikrofon lalu coba lagi.'
-        : 'Suara tidak dapat dibaca. Pastikan mikrofon aktif lalu coba lagi.')
-    }
-    recognition.onend = () => {
-      setVoiceStatus((current) => current === 'listening' ? 'idle' : current)
-    }
-    recognitionRef.current = recognition
-    recognition.start()
-  }
 
   const announceRegistrationSuccess = () => {
     if (!('speechSynthesis' in window)) return
@@ -480,11 +429,6 @@ function App() {
   const handleRegister = async (event) => {
     event.preventDefault()
 
-    if (voiceStatus !== 'verified') {
-      setMessage({ type: 'error', text: 'Selesaikan validasi suara sebelum mendaftar.' })
-      return
-    }
-
     try {
       const response = await fetch(`${API_BASE_URL}/students/register`, {
         method: 'POST',
@@ -502,8 +446,6 @@ function App() {
       setMessage({ type: 'success', text: 'Pendaftaran berhasil. Gunakan username dan password yang dibuat untuk login sebagai murid.' })
       announceRegistrationSuccess()
       setRegistrationForm(emptyRegistration)
-      setVoiceStatus('idle')
-      setVoiceTranscript('')
       if (admin) {
         await fetchStudents()
       }
@@ -867,17 +809,7 @@ function App() {
                 onChange={(event) => setRegistrationForm({ ...registrationForm, notes: event.target.value })}
               />
             </label>
-            <div className="voice-verification" role="group" aria-labelledby="voice-verification-title">
-              <strong id="voice-verification-title">Validasi suara</strong>
-              <p>Ucapkan: “{VOICE_VERIFICATION_PHRASE}”</p>
-              <button type="button" className="secondary-btn" onClick={startVoiceVerification} disabled={voiceStatus === 'listening'}>
-                {voiceStatus === 'listening' ? 'Mendengarkan...' : 'Mulai validasi suara'}
-              </button>
-              {voiceTranscript && <small>Hasil suara: “{voiceTranscript}”</small>}
-              {voiceStatus === 'verified' && <small className="voice-success">Suara berhasil diverifikasi.</small>}
-              {(voiceStatus === 'invalid' || voiceStatus === 'error') && <small className="voice-error">{voiceError}</small>}
-            </div>
-            <button type="submit" className="primary-btn" disabled={voiceStatus !== 'verified'}>Daftar sekarang</button>
+            <button type="submit" className="primary-btn">Daftar sekarang</button>
             </form>
           </section>
           )}
