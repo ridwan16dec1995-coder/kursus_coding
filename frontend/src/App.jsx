@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 // Use the Vercel same-origin proxy in production so session cookies are first-party.
@@ -16,6 +16,9 @@ const emptyRegistration = {
   interestLevel: 'Pemula',
   notes: '',
 }
+
+const BRAND_NAME = '<R/one> Code Accademy'
+const VOICE_VERIFICATION_PHRASE = `Saya mendaftar di ${BRAND_NAME}`
 
 const emptyAnnouncement = {
   title: '',
@@ -144,10 +147,60 @@ function App() {
   const [isStudentLoggingIn, setIsStudentLoggingIn] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
   const [portal, setPortal] = useState(getPortalFromPath)
+  const [voiceStatus, setVoiceStatus] = useState('idle')
+  const [voiceTranscript, setVoiceTranscript] = useState('')
+  const [voiceError, setVoiceError] = useState('')
+  const recognitionRef = useRef(null)
 
   const isPublicPortal = portal === 'publik'
   const isAdminPortal = portal === 'admin'
   const isStudentPortal = portal === 'murid'
+
+  const normalizeVoiceText = (value) => value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const startVoiceVerification = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setVoiceStatus('error')
+      setVoiceError('Browser ini belum mendukung validasi suara. Gunakan Chrome atau Edge terbaru.')
+      return
+    }
+
+    recognitionRef.current?.stop()
+    const recognition = new SpeechRecognition()
+    recognition.lang = 'id-ID'
+    recognition.interimResults = false
+    recognition.maxAlternatives = 1
+    recognition.onstart = () => {
+      setVoiceStatus('listening')
+      setVoiceError('')
+      setVoiceTranscript('')
+    }
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript.trim()
+      setVoiceTranscript(transcript)
+      const spoken = normalizeVoiceText(transcript)
+      const expected = normalizeVoiceText(VOICE_VERIFICATION_PHRASE)
+      const isValid = spoken === expected || spoken.includes(expected)
+      setVoiceStatus(isValid ? 'verified' : 'invalid')
+      setVoiceError(isValid ? '' : 'Kalimat belum cocok. Silakan coba lagi dan ucapkan kalimat persis seperti contoh.')
+    }
+    recognition.onerror = (event) => {
+      setVoiceStatus('error')
+      setVoiceError(event.error === 'not-allowed'
+        ? 'Izin mikrofon ditolak. Izinkan mikrofon lalu coba lagi.'
+        : 'Suara tidak dapat dibaca. Pastikan mikrofon aktif lalu coba lagi.')
+    }
+    recognition.onend = () => {
+      setVoiceStatus((current) => current === 'listening' ? 'idle' : current)
+    }
+    recognitionRef.current = recognition
+    recognition.start()
+  }
 
   const navigateToPortal = (nextPortal, replace = false) => {
     const destination = nextPortal === 'admin' ? '/admin' : nextPortal === 'murid' ? '/murid' : '/'
@@ -414,6 +467,11 @@ function App() {
   const handleRegister = async (event) => {
     event.preventDefault()
 
+    if (voiceStatus !== 'verified') {
+      setMessage({ type: 'error', text: 'Selesaikan validasi suara sebelum mendaftar.' })
+      return
+    }
+
     try {
       const response = await fetch(`${API_BASE_URL}/students/register`, {
         method: 'POST',
@@ -430,6 +488,8 @@ function App() {
       setStudentLoginForm({ username: registrationForm.username, password: '' })
       setMessage({ type: 'success', text: 'Pendaftaran berhasil. Gunakan username dan password yang dibuat untuk login sebagai murid.' })
       setRegistrationForm(emptyRegistration)
+      setVoiceStatus('idle')
+      setVoiceTranscript('')
       if (admin) {
         await fetchStudents()
       }
@@ -596,7 +656,7 @@ function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Platform pembelajaran coding</p>
-          <h1>R.I.D One Code Academy</h1>
+          <h1>{BRAND_NAME}</h1>
         </div>
         {!admin && !student && (
           <nav className="portal-links" aria-label="Portal aplikasi">
@@ -639,7 +699,7 @@ function App() {
           {isAdminPortal && (
           <section className="panel login-panel">
             <div className="login-brand">
-              <div className="login-mark" aria-hidden="true">R.I.D</div>
+              <div className="login-mark" aria-hidden="true">&lt;R/one&gt;</div>
               <div>
                 <p className="login-eyebrow">Admin Portal</p>
                 <h2>Selamat datang kembali</h2>
@@ -672,7 +732,7 @@ function App() {
                 {isLoggingIn ? 'Memproses...' : 'Masuk ke dashboard'}
               </button>
             </form>
-            <p className="login-security-note">Akses khusus untuk administrator R.I.D One Code Academy.</p>
+            <p className="login-security-note">Akses khusus untuk administrator {BRAND_NAME}.</p>
           </section>
           )}
 
@@ -793,7 +853,17 @@ function App() {
                 onChange={(event) => setRegistrationForm({ ...registrationForm, notes: event.target.value })}
               />
             </label>
-              <button type="submit" className="primary-btn">Daftar sekarang</button>
+            <div className="voice-verification" role="group" aria-labelledby="voice-verification-title">
+              <strong id="voice-verification-title">Validasi suara</strong>
+              <p>Ucapkan: “{VOICE_VERIFICATION_PHRASE}”</p>
+              <button type="button" className="secondary-btn" onClick={startVoiceVerification} disabled={voiceStatus === 'listening'}>
+                {voiceStatus === 'listening' ? 'Mendengarkan...' : 'Mulai validasi suara'}
+              </button>
+              {voiceTranscript && <small>Hasil suara: “{voiceTranscript}”</small>}
+              {voiceStatus === 'verified' && <small className="voice-success">Suara berhasil diverifikasi.</small>}
+              {(voiceStatus === 'invalid' || voiceStatus === 'error') && <small className="voice-error">{voiceError}</small>}
+            </div>
+            <button type="submit" className="primary-btn" disabled={voiceStatus !== 'verified'}>Daftar sekarang</button>
             </form>
           </section>
           )}
@@ -907,7 +977,7 @@ function App() {
           <aside className="admin-sidebar">
             <div className="admin-sidebar-heading">
               <p>Dashboard Admin</p>
-              <strong>R.I.D Academy</strong>
+              <strong>{BRAND_NAME}</strong>
             </div>
             <nav className="admin-nav" aria-label="Navigasi admin">
               {adminModules.map((module) => (

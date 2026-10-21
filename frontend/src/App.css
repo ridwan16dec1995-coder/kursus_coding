@@ -207,6 +207,36 @@ textarea {
   background: #f8fafc;
 }
 
+.voice-verification {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #bae6fd;
+  border-radius: 12px;
+  background: #f0f9ff;
+  color: #0c4a6e;
+}
+
+.voice-verification p,
+.voice-verification small {
+  margin: 0;
+}
+
+.voice-verification small {
+  color: #475569;
+  line-height: 1.45;
+}
+
+.voice-verification .voice-success {
+  color: #166534;
+  font-weight: 700;
+}
+
+.voice-verification .voice-error {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
 .admin-layout {
   display: grid;
   grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);
