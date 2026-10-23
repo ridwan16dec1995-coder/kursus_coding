@@ -15,10 +15,13 @@ if not database_url or database_url.startswith('mysql'):
 
 schema_path = ROOT / 'backend' / 'database' / 'schema.postgresql.sql'
 schema_sql = schema_path.read_text(encoding='utf-8')
+migration_path = ROOT / 'backend' / 'database' / 'migrations' / '002_add_student_password_reset.postgresql.sql'
+migration_sql = migration_path.read_text(encoding='utf-8')
 
 with psycopg.connect(database_url) as connection:
     with connection.cursor() as cursor:
         cursor.execute(schema_sql)
+        cursor.execute(migration_sql)
         cursor.execute(
             """
             SELECT table_name
@@ -26,7 +29,7 @@ with psycopg.connect(database_url) as connection:
             WHERE table_schema = 'public'
               AND table_name IN (
                 'admin_users', 'students', 'announcements', 'student_progress',
-                'courses', 'enrollments', 'weekly_grades'
+                'courses', 'enrollments', 'weekly_grades', 'student_password_reset_tokens'
               )
             ORDER BY table_name
             """

@@ -576,6 +576,7 @@ def create_app(test_config=None):
             if not send_password_reset_email(app, student.email, reset_url):
                 db.session.delete(reset_token)
                 db.session.commit()
+                return jsonify({'ok': False, 'message': 'Layanan email reset password belum siap. Hubungi administrator.'}), 503
         return jsonify({'ok': True, 'message': generic_message})
 
     @app.route('/api/student/reset-password', methods=['POST'])
