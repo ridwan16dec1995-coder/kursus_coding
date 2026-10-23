@@ -6,6 +6,21 @@ const API_BASE_URL = import.meta.env.DEV
   ? (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api')
   : '/api'
 
+async function readApiResponse(response) {
+  const contentType = response.headers.get('content-type') || ''
+  const body = await response.text()
+  if (!contentType.includes('application/json')) {
+    throw new Error(response.ok
+      ? 'Server mengembalikan halaman yang tidak sesuai. Coba refresh halaman.'
+      : `Server API tidak tersedia (HTTP ${response.status}).`)
+  }
+  try {
+    return JSON.parse(body)
+  } catch {
+    throw new Error('Respons server tidak valid. Coba refresh halaman atau hubungi administrator.')
+  }
+}
+
 const emptyRegistration = {
   fullName: '',
   email: '',
@@ -204,7 +219,7 @@ function App() {
 
   const fetchAnnouncements = async () => {
     const response = await fetch(`${API_BASE_URL}/announcements`)
-    const result = await response.json()
+    const result = await readApiResponse(response)
 
     if (!response.ok) {
       throw new Error(result.message || 'Gagal memuat pengumuman.')
@@ -215,7 +230,7 @@ function App() {
 
   const fetchStudents = async () => {
     const response = await fetch(`${API_BASE_URL}/students`, { credentials: 'include' })
-    const result = await response.json()
+    const result = await readApiResponse(response)
 
     if (response.status === 401) {
       clearAdminData('Sesi admin telah berakhir. Silakan login kembali.')
@@ -232,14 +247,14 @@ function App() {
 
   const fetchCourses = async () => {
     const response = await fetch(`${API_BASE_URL}/courses`)
-    const result = await response.json()
+    const result = await readApiResponse(response)
     if (!response.ok) throw new Error(result.message || 'Gagal memuat kursus.')
     setCourses(result.items || [])
   }
 
   const fetchEnrollments = async () => {
     const response = await fetch(`${API_BASE_URL}/enrollments`, { credentials: 'include' })
-    const result = await response.json()
+    const result = await readApiResponse(response)
     if (response.status === 401) {
       clearAdminData('Sesi admin telah berakhir. Silakan login kembali.')
       return false
@@ -261,7 +276,7 @@ function App() {
         await fetchAnnouncements()
         await fetchCourses()
         const adminResponse = await fetch(`${API_BASE_URL}/admin/session`, { credentials: 'include' })
-        const adminResult = await adminResponse.json()
+        const adminResult = await readApiResponse(adminResponse)
 
         if (adminResponse.ok && adminResult.authenticated) {
           setAdmin({ username: adminResult.username, csrfToken: adminResult.csrfToken })
@@ -272,7 +287,7 @@ function App() {
         }
 
         const studentResponse = await fetch(`${API_BASE_URL}/student/session`, { credentials: 'include' })
-        const studentResult = await studentResponse.json()
+        const studentResult = await readApiResponse(studentResponse)
         if (studentResponse.ok && studentResult.authenticated) {
           setStudent({ ...studentResult.student, csrfToken: studentResult.csrfToken })
           navigateToPortal('murid', true)
@@ -341,7 +356,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(loginForm),
       })
-      const result = await response.json()
+      const result = await readApiResponse(response)
 
       if (!response.ok) {
         setMessage({ type: 'error', text: result.message || 'Login gagal.' })
@@ -370,7 +385,7 @@ function App() {
         credentials: 'include',
         headers: { 'X-CSRF-Token': admin.csrfToken },
       })
-      const result = await response.json()
+      const result = await readApiResponse(response)
       setMessage({
         type: response.ok ? 'success' : 'error',
         text: response.ok ? 'Logout berhasil.' : result.message || 'Logout tidak dapat diselesaikan.',
@@ -395,7 +410,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(studentLoginForm),
       })
-      const result = await response.json()
+      const result = await readApiResponse(response)
 
       if (!response.ok) {
         setMessage({ type: 'error', text: result.message || 'Login murid gagal.' })
@@ -423,7 +438,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(forgotPasswordForm),
       })
-      const result = await response.json()
+      const result = await readApiResponse(response)
       setMessage({ type: response.ok ? 'success' : 'error', text: result.message || 'Permintaan reset gagal.' })
       if (response.ok) {
         setForgotPasswordForm(emptyForgotPassword)
@@ -449,7 +464,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: resetToken, password: resetPasswordForm.password }),
       })
-      const result = await response.json()
+      const result = await readApiResponse(response)
       setMessage({ type: response.ok ? 'success' : 'error', text: result.message || 'Password gagal diubah.' })
       if (response.ok) {
         setResetPasswordForm(emptyResetPassword)
@@ -470,7 +485,7 @@ function App() {
         credentials: 'include',
         headers: { 'X-CSRF-Token': student.csrfToken },
       })
-      const result = await response.json()
+      const result = await readApiResponse(response)
       setMessage({
         type: response.ok ? 'success' : 'error',
         text: response.ok ? 'Logout murid berhasil.' : result.message || 'Logout murid tidak dapat diselesaikan.',
@@ -493,7 +508,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(registrationForm),
       })
-      const result = await response.json()
+      const result = await readApiResponse(response)
 
       if (!response.ok) {
         setMessage({ type: 'error', text: result.message || 'Pendaftaran gagal.' })
@@ -526,7 +541,7 @@ function App() {
         },
         body: JSON.stringify(announcementForm),
       })
-      const result = await response.json()
+      const result = await readApiResponse(response)
 
       if (response.status === 401) {
         clearAdminData('Sesi admin telah berakhir. Silakan login kembali.')
@@ -571,7 +586,7 @@ function App() {
           notes: progressForm.notes,
         }),
       })
-      const result = await response.json()
+      const result = await readApiResponse(response)
 
       if (response.status === 401) {
         clearAdminData('Sesi admin telah berakhir. Silakan login kembali.')
@@ -601,7 +616,7 @@ function App() {
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': admin.csrfToken },
         body: JSON.stringify(courseForm),
       })
-      const result = await response.json()
+      const result = await readApiResponse(response)
       if (!response.ok) {
         setMessage({ type: 'error', text: result.message || 'Kursus gagal dibuat.' })
         return
@@ -624,7 +639,7 @@ function App() {
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': admin.csrfToken },
         body: JSON.stringify(enrollmentForm),
       })
-      const result = await response.json()
+      const result = await readApiResponse(response)
       if (!response.ok) {
         setMessage({ type: 'error', text: result.message || 'Pendaftaran kursus gagal.' })
         return
@@ -651,7 +666,7 @@ function App() {
           notes: weeklyGradeForm.notes,
         }),
       })
-      const result = await response.json()
+      const result = await readApiResponse(response)
       if (!response.ok) {
         setMessage({ type: 'error', text: result.message || 'Nilai mingguan gagal disimpan.' })
         return
