@@ -34,6 +34,9 @@ const emptyStudentLogin = {
   password: '',
 }
 
+const emptyForgotPassword = { email: '' }
+const emptyResetPassword = { password: '', confirmation: '' }
+
 const emptyProgress = {
   studentId: '',
   subject: '',
@@ -129,6 +132,8 @@ function App() {
   const [announcements, setAnnouncements] = useState([])
   const [loginForm, setLoginForm] = useState(emptyLogin)
   const [studentLoginForm, setStudentLoginForm] = useState(emptyStudentLogin)
+  const [forgotPasswordForm, setForgotPasswordForm] = useState(emptyForgotPassword)
+  const [resetPasswordForm, setResetPasswordForm] = useState(emptyResetPassword)
   const [registrationForm, setRegistrationForm] = useState(emptyRegistration)
   const [announcementForm, setAnnouncementForm] = useState(emptyAnnouncement)
   const [progressForm, setProgressForm] = useState(emptyProgress)
@@ -144,8 +149,12 @@ function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [isStudentLoggingIn, setIsStudentLoggingIn] = useState(false)
+  const [isSendingReset, setIsSendingReset] = useState(false)
+  const [isResettingPassword, setIsResettingPassword] = useState(false)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
   const [portal, setPortal] = useState(getPortalFromPath)
+  const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get('resetToken') || '')
 
   const isPublicPortal = portal === 'publik'
   const isAdminPortal = portal === 'admin'
@@ -402,6 +411,55 @@ function App() {
       setMessage({ type: 'error', text: 'Login murid gagal. Coba lagi.' })
     } finally {
       setIsStudentLoggingIn(false)
+    }
+  }
+
+  const handleForgotPassword = async (event) => {
+    event.preventDefault()
+    setIsSendingReset(true)
+    try {
+      const response = await fetch(`${API_BASE_URL}/student/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(forgotPasswordForm),
+      })
+      const result = await response.json()
+      setMessage({ type: response.ok ? 'success' : 'error', text: result.message || 'Permintaan reset gagal.' })
+      if (response.ok) {
+        setForgotPasswordForm(emptyForgotPassword)
+        setShowForgotPassword(false)
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Permintaan reset gagal. Coba lagi.' })
+    } finally {
+      setIsSendingReset(false)
+    }
+  }
+
+  const handleResetPassword = async (event) => {
+    event.preventDefault()
+    if (resetPasswordForm.password !== resetPasswordForm.confirmation) {
+      setMessage({ type: 'error', text: 'Konfirmasi password tidak cocok.' })
+      return
+    }
+    setIsResettingPassword(true)
+    try {
+      const response = await fetch(`${API_BASE_URL}/student/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: resetToken, password: resetPasswordForm.password }),
+      })
+      const result = await response.json()
+      setMessage({ type: response.ok ? 'success' : 'error', text: result.message || 'Password gagal diubah.' })
+      if (response.ok) {
+        setResetPasswordForm(emptyResetPassword)
+        setResetToken('')
+        window.history.replaceState({}, '', '/murid')
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Password gagal diubah. Coba lagi.' })
+    } finally {
+      setIsResettingPassword(false)
     }
   }
 
@@ -692,7 +750,18 @@ function App() {
           </section>
           )}
 
-          {isStudentPortal && (
+          {isStudentPortal && resetToken && (
+          <section className="panel login-panel student-login-panel">
+            <div className="login-brand"><div className="login-mark" aria-hidden="true">Reset</div><div><p className="login-eyebrow">Pemulihan akun</p><h2>Buat password baru</h2></div></div>
+            <form onSubmit={handleResetPassword} className="stacked-form login-form" aria-busy={isResettingPassword}>
+              <label className="login-field">Password baru<input required minLength="8" type="password" autoComplete="new-password" value={resetPasswordForm.password} onChange={(event) => setResetPasswordForm({ ...resetPasswordForm, password: event.target.value })} /></label>
+              <label className="login-field">Konfirmasi password<input required minLength="8" type="password" autoComplete="new-password" value={resetPasswordForm.confirmation} onChange={(event) => setResetPasswordForm({ ...resetPasswordForm, confirmation: event.target.value })} /></label>
+              <button type="submit" className="primary-btn login-submit" disabled={isResettingPassword}>{isResettingPassword ? 'Menyimpan...' : 'Simpan password baru'}</button>
+            </form>
+          </section>
+          )}
+
+          {isStudentPortal && !resetToken && (
           <section className="panel login-panel student-login-panel">
             <div className="login-brand">
               <div className="login-mark" aria-hidden="true">Murid</div>
@@ -728,6 +797,14 @@ function App() {
                 {isStudentLoggingIn ? 'Memproses...' : 'Masuk sebagai murid'}
               </button>
             </form>
+            {showForgotPassword ? (
+              <form onSubmit={handleForgotPassword} className="stacked-form forgot-password-form">
+                <label className="login-field">Email akun murid<input required type="email" autoComplete="email" value={forgotPasswordForm.email} onChange={(event) => setForgotPasswordForm({ email: event.target.value })} /></label>
+                <button type="submit" className="secondary-btn" disabled={isSendingReset}>{isSendingReset ? 'Mengirim...' : 'Kirim tautan reset'}</button>
+              </form>
+            ) : (
+              <button type="button" className="text-btn" onClick={() => setShowForgotPassword(true)}>Lupa password?</button>
+            )}
             <p className="login-security-note">Belum punya akun? Lengkapi formulir pendaftaran melalui halaman Pendaftaran.</p>
           </section>
           )}

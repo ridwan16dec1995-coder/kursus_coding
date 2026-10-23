@@ -207,6 +207,27 @@ textarea {
   background: #f8fafc;
 }
 
+.text-btn {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #0369a1;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+}
+
+.text-btn:hover {
+  text-decoration: underline;
+}
+
+.forgot-password-form {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+}
+
 .admin-layout {
   display: grid;
   grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);

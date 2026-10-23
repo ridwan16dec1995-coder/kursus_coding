@@ -99,8 +99,11 @@ Model kursus baru menggunakan tabel `courses`, `enrollments`, dan `weekly_grades
 - `APP_ENV=development` digunakan untuk komputer lokal. Nilai `production` mengharuskan `SECRET_KEY` minimal 32 karakter, `SESSION_COOKIE_SECURE=true`, dan `CORS_ALLOWED_ORIGINS` terisi.
 - `AUTO_CREATE_SCHEMA=true` hanya untuk development atau test. Atur ke `false` pada production agar aplikasi tidak membuat atau mengubah tabel secara otomatis ketika dijalankan.
 - `SQLITE_DATABASE_PATH` relatif terhadap root project, sehingga lokasi database tetap konsisten walaupun backend dijalankan dari folder berbeda.
+- Fitur lupa password murid memakai SMTP. Untuk Gmail, aktifkan verifikasi 2 langkah dan buat `App Password`, lalu isi `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM`, serta `FRONTEND_URL`.
 - Salin `frontend/.env.example` ke `frontend/.env` jika alamat API frontend perlu diubah. Gunakan `VITE_API_BASE_URL` tanpa menaruh secret di sana.
 - Jangan menyimpan `.env`, backup database, atau database SQLite ke Git.
+
+Sebelum mengaktifkan lupa password pada database production, jalankan migration `backend/database/migrations/002_add_student_password_reset.sql` untuk MySQL atau varian `.postgresql.sql` untuk PostgreSQL.
 
 ## Pemeriksaan aplikasi
 

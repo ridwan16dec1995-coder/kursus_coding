@@ -1,7 +1,10 @@
 import os
 import secrets
+import smtplib
 import time
 from datetime import timedelta
+from datetime import datetime, timezone
+from email.message import EmailMessage
 from functools import wraps
 from pathlib import Path
 
@@ -138,6 +141,18 @@ class Student(db.Model):
         self.status = status
 
 
+class StudentPasswordResetToken(db.Model):
+    __tablename__ = 'student_password_reset_tokens'
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False)
+    token_hash = db.Column(db.String(64), unique=True, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, server_default=text('CURRENT_TIMESTAMP'))
+
+    student = db.relationship('Student', backref=db.backref('password_reset_tokens', lazy=True, cascade='all, delete-orphan'))
+
+
 class Announcement(db.Model):
     __tablename__ = 'announcements'
     id = db.Column(db.Integer, primary_key=True)
@@ -252,6 +267,41 @@ def serialize_course(course):
 
 def score_to_grade(score):
     return {100: 'A', 80: 'B', 75: 'C', 60: 'D'}.get(score)
+
+
+def hash_reset_token(token):
+    import hashlib
+    return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+
+def send_password_reset_email(app, recipient, reset_url):
+    host = app.config.get('MAIL_SERVER')
+    port = app.config.get('MAIL_PORT')
+    username = app.config.get('MAIL_USERNAME')
+    password = app.config.get('MAIL_PASSWORD')
+    sender = app.config.get('MAIL_FROM') or username
+    if not all((host, port, username, password, sender)):
+        app.logger.error('Konfigurasi SMTP belum lengkap; email reset tidak dikirim.')
+        return False
+
+    message = EmailMessage()
+    message['Subject'] = 'Atur ulang password akun murid'
+    message['From'] = sender
+    message['To'] = recipient
+    message.set_content(
+        'Kami menerima permintaan untuk mengatur ulang password akun murid Anda.\n\n'
+        f'Buka tautan berikut dalam waktu 30 menit:\n{reset_url}\n\n'
+        'Jika Anda tidak meminta perubahan ini, abaikan email ini.'
+    )
+    try:
+        with smtplib.SMTP(host, port, timeout=10) as server:
+            server.starttls()
+            server.login(username, password)
+            server.send_message(message)
+        return True
+    except Exception:
+        app.logger.exception('Pengiriman email reset password gagal.')
+        return False
 
 
 def serialize_enrollment(enrollment, include_grades=True):
@@ -377,6 +427,12 @@ def create_app(test_config=None):
         CORS_ALLOWED_ORIGINS=allowed_origins_from_environment(),
         ADMIN_BOOTSTRAP_USERNAME=os.getenv('ADMIN_BOOTSTRAP_USERNAME'),
         ADMIN_BOOTSTRAP_PASSWORD=os.getenv('ADMIN_BOOTSTRAP_PASSWORD'),
+        MAIL_SERVER=os.getenv('MAIL_SERVER'),
+        MAIL_PORT=int(os.getenv('MAIL_PORT', '587')),
+        MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
+        MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
+        MAIL_FROM=os.getenv('MAIL_FROM'),
+        FRONTEND_URL=os.getenv('FRONTEND_URL', 'http://localhost:5173'),
     )
     if test_config:
         app.config.update(test_config)
@@ -495,6 +551,52 @@ def create_app(test_config=None):
             'csrfToken': session['csrf_token'],
             'message': 'Login murid berhasil',
         })
+
+    @app.route('/api/student/forgot-password', methods=['POST'])
+    def student_forgot_password():
+        if not rate_limit(f'student-forgot-password:{request.remote_addr}', 5, 3600):
+            return jsonify({'ok': False, 'message': 'Terlalu banyak permintaan. Coba lagi nanti.'}), 429
+        payload = request.get_json(silent=True) or {}
+        email = (payload.get('email') or '').strip().lower()
+        generic_message = 'Jika email terdaftar, tautan pengaturan ulang password telah dikirim.'
+        if not email or len(email) > 150:
+            return jsonify({'ok': True, 'message': generic_message})
+
+        student = Student.query.filter_by(email=email).first()
+        if student:
+            raw_token = secrets.token_urlsafe(32)
+            reset_token = StudentPasswordResetToken(
+                student_id=student.id,
+                token_hash=hash_reset_token(raw_token),
+                expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=30),
+            )
+            db.session.add(reset_token)
+            db.session.commit()
+            reset_url = f"{app.config['FRONTEND_URL'].rstrip('/')}/murid?resetToken={raw_token}"
+            if not send_password_reset_email(app, student.email, reset_url):
+                db.session.delete(reset_token)
+                db.session.commit()
+        return jsonify({'ok': True, 'message': generic_message})
+
+    @app.route('/api/student/reset-password', methods=['POST'])
+    def student_reset_password():
+        payload = request.get_json(silent=True) or {}
+        token = (payload.get('token') or '').strip()
+        password = payload.get('password') or ''
+        if not token or len(password) < 8:
+            return jsonify({'ok': False, 'message': 'Token dan password minimal 8 karakter wajib diisi.'}), 400
+
+        reset_token = StudentPasswordResetToken.query.filter_by(
+            token_hash=hash_reset_token(token), used_at=None,
+        ).first()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if not reset_token or reset_token.expires_at <= now:
+            return jsonify({'ok': False, 'message': 'Tautan reset tidak valid atau sudah kedaluwarsa.'}), 400
+
+        reset_token.student.password_hash = generate_password_hash(password)
+        reset_token.used_at = now
+        db.session.commit()
+        return jsonify({'ok': True, 'message': 'Password berhasil diubah. Silakan login kembali.'})
 
     @app.route('/api/student/session', methods=['GET'])
     def student_session():
