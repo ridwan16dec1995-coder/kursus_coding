@@ -832,6 +832,7 @@ textarea {
   justify-content: center;
 }
 
+.portal-links a,
 .portal-links button {
   border: 1px solid #cbd5e1;
   border-radius: 999px;
@@ -842,8 +843,11 @@ textarea {
   font-size: 0.82rem;
   font-weight: 700;
   padding: 8px 12px;
+  text-decoration: none;
 }
 
+.portal-links a:hover,
+.portal-links a.is-active,
 .portal-links button:hover,
 .portal-links button.is-active {
   border-color: #0ea5e9;
