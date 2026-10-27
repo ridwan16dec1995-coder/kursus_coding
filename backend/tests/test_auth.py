@@ -1,6 +1,15 @@
+import os
 import unittest
+from unittest import mock
 
-from app import _rate_limit_state, create_app, db
+from app import (
+    AdminUser,
+    _rate_limit_state,
+    allowed_origins_from_environment,
+    bootstrap_first_admin,
+    create_app,
+    db,
+)
 from sqlalchemy.pool import StaticPool
 
 
@@ -190,6 +199,34 @@ class AuthenticationTestCase(unittest.TestCase):
                 'CORS_ALLOWED_ORIGINS': ['https://kursus.example.com'],
                 'AUTO_CREATE_SCHEMA': False,
             })
+
+    def test_allowed_origins_come_only_from_the_environment(self):
+        with mock.patch.dict(os.environ, {'CORS_ALLOWED_ORIGINS': 'https://kursus.example.com'}):
+            self.assertEqual(allowed_origins_from_environment(), ['https://kursus.example.com'])
+
+        with mock.patch.dict(os.environ, {'CORS_ALLOWED_ORIGINS': ''}):
+            self.assertEqual(allowed_origins_from_environment(), [])
+
+    def test_bootstrap_never_overwrites_an_existing_admin_password(self):
+        original = self.login()
+        self.assertTrue(original['ok'])
+
+        with self.app.app_context():
+            self.app.config['ADMIN_BOOTSTRAP_PASSWORD'] = 'password-yang-berbeda'
+            bootstrap_first_admin(self.app)
+
+        rejected = self.client.post('/api/admin/login', json={
+            'username': 'admin-test',
+            'password': 'password-yang-berbeda',
+        })
+        self.assertEqual(rejected.status_code, 401)
+        self.assertEqual(self.login()['ok'], True)
+
+    def test_bootstrap_skips_when_any_admin_already_exists(self):
+        with self.app.app_context():
+            self.app.config['ADMIN_BOOTSTRAP_USERNAME'] = 'admin-kedua'
+            bootstrap_first_admin(self.app)
+            self.assertEqual(AdminUser.query.count(), 1)
 
     def test_progress_accepts_only_the_four_configured_scores(self):
         student = self.register_student()

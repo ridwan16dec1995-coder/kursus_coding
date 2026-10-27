@@ -1,10 +1,8 @@
 import os
 import secrets
-import smtplib
 import time
 from datetime import timedelta
 from datetime import datetime, timezone
-from email.message import EmailMessage
 from functools import wraps
 from pathlib import Path
 
@@ -15,6 +13,12 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
+
+from mailer import (
+    MailDeliveryError,
+    PASSWORD_RESET_TTL_MINUTES,
+    send_password_reset_email,
+)
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
@@ -69,12 +73,7 @@ def as_origins(value):
 
 
 def allowed_origins_from_environment():
-    configured = as_origins(os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:5173'))
-    # Keep the public Vercel frontend usable when dashboard variables are stale.
-    public_frontend = 'https://kursus-coding-6rz1.vercel.app'
-    if public_frontend not in configured:
-        configured.append(public_frontend)
-    return configured
+    return as_origins(os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:5173'))
 
 
 def validate_runtime_configuration(app):
@@ -274,34 +273,10 @@ def hash_reset_token(token):
     return hashlib.sha256(token.encode('utf-8')).hexdigest()
 
 
-def send_password_reset_email(app, recipient, reset_url):
-    host = app.config.get('MAIL_SERVER')
-    port = app.config.get('MAIL_PORT')
-    username = app.config.get('MAIL_USERNAME')
-    password = app.config.get('MAIL_PASSWORD')
-    sender = app.config.get('MAIL_FROM') or username
-    if not all((host, port, username, password, sender)):
-        app.logger.error('Konfigurasi SMTP belum lengkap; email reset tidak dikirim.')
-        return False
-
-    message = EmailMessage()
-    message['Subject'] = 'Atur ulang password akun murid'
-    message['From'] = sender
-    message['To'] = recipient
-    message.set_content(
-        'Kami menerima permintaan untuk mengatur ulang password akun murid Anda.\n\n'
-        f'Buka tautan berikut dalam waktu 30 menit:\n{reset_url}\n\n'
-        'Jika Anda tidak meminta perubahan ini, abaikan email ini.'
-    )
-    try:
-        with smtplib.SMTP(host, port, timeout=10) as server:
-            server.starttls()
-            server.login(username, password)
-            server.send_message(message)
-        return True
-    except Exception:
-        app.logger.exception('Pengiriman email reset password gagal.')
-        return False
+def build_password_reset_url(raw_token):
+    """Susun tautan reset password yang mengarah ke portal murid di frontend."""
+    frontend_url = current_app.config['FRONTEND_URL'].rstrip('/')
+    return f'{frontend_url}/murid?resetToken={raw_token}'
 
 
 def serialize_enrollment(enrollment, include_grades=True):
@@ -398,6 +373,28 @@ def ensure_student_login_schema():
         db.session.commit()
 
 
+def bootstrap_first_admin(app):
+    """Buat admin pertama hanya ketika tabel admin masih kosong.
+
+    Akun yang sudah ada tidak pernah ditimpa, sehingga password admin aman
+    walaupun ADMIN_BOOTSTRAP_PASSWORD tertinggal di environment.
+    """
+    username = app.config.get('ADMIN_BOOTSTRAP_USERNAME')
+    password = app.config.get('ADMIN_BOOTSTRAP_PASSWORD')
+    if not username or not password:
+        return
+
+    if AdminUser.query.first():
+        app.logger.info(
+            'Admin sudah ada, bootstrap dilewati. '
+            'Hapus ADMIN_BOOTSTRAP_USERNAME dan ADMIN_BOOTSTRAP_PASSWORD dari environment.'
+        )
+        return
+
+    db.session.add(AdminUser(username=username, password_hash=generate_password_hash(password)))
+    db.session.commit()
+
+
 def create_app(test_config=None):
     secret_key = os.getenv('SECRET_KEY')
     if not secret_key and not test_config:
@@ -428,10 +425,13 @@ def create_app(test_config=None):
         ADMIN_BOOTSTRAP_USERNAME=os.getenv('ADMIN_BOOTSTRAP_USERNAME'),
         ADMIN_BOOTSTRAP_PASSWORD=os.getenv('ADMIN_BOOTSTRAP_PASSWORD'),
         MAIL_SERVER=os.getenv('MAIL_SERVER'),
-        MAIL_PORT=int(os.getenv('MAIL_PORT', '587')),
+        MAIL_PORT=int(os.getenv('MAIL_PORT') or 587),
         MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
         MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
         MAIL_FROM=os.getenv('MAIL_FROM'),
+        MAIL_TIMEOUT_SECONDS=int(os.getenv('MAIL_TIMEOUT_SECONDS') or 15),
+        MAIL_STARTTLS=as_bool(os.getenv('MAIL_STARTTLS', 'true')),
+        BRAND_NAME=os.getenv('BRAND_NAME', 'LahNgoding'),
         FRONTEND_URL=os.getenv('FRONTEND_URL', 'http://localhost:5173'),
     )
     if test_config:
@@ -456,15 +456,7 @@ def create_app(test_config=None):
         if app.config['AUTO_CREATE_SCHEMA']:
             db.create_all()
             ensure_student_login_schema()
-            username = app.config.get('ADMIN_BOOTSTRAP_USERNAME')
-            password = app.config.get('ADMIN_BOOTSTRAP_PASSWORD')
-            if username and password:
-                bootstrap_admin = AdminUser.query.filter_by(username=username).first()
-                if bootstrap_admin:
-                    bootstrap_admin.password_hash = generate_password_hash(password)
-                else:
-                    db.session.add(AdminUser(username=username, password_hash=generate_password_hash(password)))
-                db.session.commit()
+            bootstrap_first_admin(app)
 
     @app.after_request
     def apply_security_headers(response):
@@ -563,20 +555,40 @@ def create_app(test_config=None):
             return jsonify({'ok': True, 'message': generic_message})
 
         student = Student.query.filter_by(email=email).first()
-        if student:
-            raw_token = secrets.token_urlsafe(32)
-            reset_token = StudentPasswordResetToken(
-                student_id=student.id,
-                token_hash=hash_reset_token(raw_token),
-                expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=30),
-            )
-            db.session.add(reset_token)
+        if not student:
+            # Balasan tetap generik agar email terdaftar tidak bisa ditebak.
+            app.logger.info('Permintaan reset password untuk email yang tidak terdaftar.')
+            return jsonify({'ok': True, 'message': generic_message})
+
+        raw_token = secrets.token_urlsafe(32)
+        reset_token = StudentPasswordResetToken(
+            student_id=student.id,
+            token_hash=hash_reset_token(raw_token),
+            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=PASSWORD_RESET_TTL_MINUTES),
+        )
+        db.session.add(reset_token)
+        db.session.commit()
+
+        try:
+            send_password_reset_email(current_app, student.email, build_password_reset_url(raw_token))
+        except MailDeliveryError:
+            # Email gagal: cabut token yang baru dibuat agar tidak ada tautan aktif tanpa pemilik.
+            db.session.delete(reset_token)
             db.session.commit()
-            reset_url = f"{app.config['FRONTEND_URL'].rstrip('/')}/murid?resetToken={raw_token}"
-            if not send_password_reset_email(app, student.email, reset_url):
-                db.session.delete(reset_token)
-                db.session.commit()
-                return jsonify({'ok': False, 'message': 'Layanan email reset password belum siap. Hubungi administrator.'}), 503
+            app.logger.exception('Pengiriman email reset password gagal.')
+            return jsonify({
+                'ok': False,
+                'message': 'Layanan email reset password belum siap. Hubungi administrator.',
+            }), 503
+
+        # Hanya satu tautan reset yang boleh aktif untuk satu murid.
+        StudentPasswordResetToken.query.filter(
+            StudentPasswordResetToken.student_id == student.id,
+            StudentPasswordResetToken.used_at.is_(None),
+            StudentPasswordResetToken.id != reset_token.id,
+        ).delete(synchronize_session=False)
+        db.session.commit()
+
         return jsonify({'ok': True, 'message': generic_message})
 
     @app.route('/api/student/reset-password', methods=['POST'])
