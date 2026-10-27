@@ -103,6 +103,52 @@ Model kursus baru menggunakan tabel `courses`, `enrollments`, dan `weekly_grades
 - Salin `frontend/.env.example` ke `frontend/.env` jika alamat API frontend perlu diubah. Gunakan `VITE_API_BASE_URL` tanpa menaruh secret di sana.
 - Jangan menyimpan `.env`, backup database, atau database SQLite ke Git.
 
+### Aktivasi email lupa password (Gmail)
+
+Fitur ini aktif otomatis begitu `MAIL_*` terisi di environment backend. Langkah lengkapnya:
+
+1. Aktifkan **Verifikasi 2 Langkah** pada akun Gmail yang dipakai untuk mengirim email.
+2. Buat **App Password**: buka https://myaccount.google.com/apppasswords, pilih aplikasi "Mail" dan perangkat "Lainnya", lalu salin 16 karakter yang muncul. Password akun biasa tidak bisa dipakai.
+3. Isi variabel berikut di `.env` (file ini tidak masuk Git):
+
+```env
+FRONTEND_URL=http://localhost:5173
+MAIL_SERVER=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=gmail-anda@gmail.com
+MAIL_PASSWORD=app-password-16-karakter
+MAIL_FROM=gmail-anda@gmail.com
+MAIL_TIMEOUT_SECONDS=15
+MAIL_STARTTLS=true
+```
+
+> `MAIL_STARTTLS=false` hanya diperlukan bila server SMTP internal tidak mendukung TLS. Untuk Gmail biarkan `true`.
+
+4. Uji konfigurasi SMTP sebelum dipakai murid:
+
+```bash
+python backend/scripts/check_mail_config.py --send gmail-anda@gmail.com
+```
+
+Skrip memvalidasi kelengkapan konfigurasi, mencoba login ke SMTP, lalu mengirim email uji coba. Keluar dengan kode 0 bila berhasil. Kegagalan umum:
+
+| Gejala | Penyebab | Solusi |
+| --- | --- | --- |
+| `GAGAL: variabel ... belum terisi` | Variabel `MAIL_*` kosong di `.env` | Isi sesuai langkah 3 |
+| `Autentikasi SMTP gagal` | Password biasa, App Password salah, atau 2FA belum aktif | Buat ulang App Password |
+| `Server SMTP tidak dapat dihubungi` | Port terblokir atau jaringan server dibatasi | Coba `MAIL_PORT=465` (SSL) atau cek firewall |
+| Email masuk spam | Reputasi akun baru | Minta murid memeriksa folder spam, kirim email uji coba lebih dulu |
+
+5. Migration token reset wajib sudah applied di database production: `backend/database/migrations/002_add_student_password_reset.sql` (MySQL) atau varian `.postgresql.sql` (PostgreSQL/Neon).
+
+Catatan operasional:
+
+- Tautan reset berlaku 30 menit, hanya satu tautan aktif per murid, dan token disimpan sebagai SHA-256 sehingga tautan tidak bisa ditebak dari database.
+- Body email dikirim sebagai `7bit` tanpa quoted-printable, sehingga URL reset tetap utuh satu baris dan tidak bisa terpotong oleh webmail yang membaca sumber email mentah.
+- Permintaan reset dibatasi 5 kali per jam per alamat IP, dan balasannya selalu generik agar email terdaftar tidak bisa ditebak.
+- Untuk deployment, isi `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM`, dan `FRONTEND_URL` pada environmentVariables platform (Vercel untuk backend serverless, atau Render untuk backend Docker). `FRONTEND_URL` harus menunjuk ke frontend publik, bukan ke API.
+- Alamat frontend tidak disimpan di dalam kode; tautan reset memakai `FRONTEND_URL`, jadi satu variabel ini sudah cukup untuk mengatur asal email.
+
 Sebelum mengaktifkan lupa password pada database production, jalankan migration `backend/database/migrations/002_add_student_password_reset.sql` untuk MySQL atau varian `.postgresql.sql` untuk PostgreSQL.
 
 ## Pemeriksaan aplikasi
